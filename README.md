@@ -4,4 +4,4 @@ IDF curves by fitting GEV Type II distribution on Annual Maxima Series using PHL
 
 Also includes future PHL time series based on the 2080-2100 storm set
 
-![idf plot](IDF_fig.png)
+![Screenshot](IDF_fig.png)
