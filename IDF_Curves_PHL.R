@@ -27,15 +27,17 @@ conversion_table <- data.frame("ARI"=c(2,5,10,25,50, 100), "ratios"=c(1.086,1.02
 date_min_sim <- ymd("1899-01-01", tz = "EST")
 date_max_sim <- ymd("2016-01-01", tz = "EST")
 
+#filename should be in csv format.
+# raw data should hace datetime column name as date.time and precip data should
+#have column name as precip
 
-setwd("D:/IDF_updates_2_7_16/Seb_future_timeseries/3202017_work/annual_maxima/current_future")
+#Some things to improve:
+#Work on formatting the data before file is input to the function.
 
-file.name <- "PHL_FUT_1900-2015_hourly.csv"
-file.name <- "PHL_hourly_rain.csv"
 idf_dev <- function(filename) {
 
 #Read PHL end of century simulated hourly rainfall data
-df_raw <- read.csv(filename, header= TRUE)
+df_raw <- read.csv(filename, header= TRUE, row.names = 1)
 
 #Set datetime
 df_raw$date.time <- ymd_hms(df_raw$date.time, tz = "America/New_york")
@@ -44,10 +46,10 @@ df_raw$date.time <- ymd_hms(df_raw$date.time, tz = "America/New_york")
 df_raw <- df_raw %>%
   arrange(date.time) %>% 
   filter(
-    pr_in > 0 &
+    precip > 0 &
     date.time > date_min_sim &
     date.time < date_max_sim) %>%
-  select(date.time, pr_in)
+  select(date.time, precip)
 
 #Set column names
 names(df_raw) <- c("DateTime", "Rainfall")
@@ -150,7 +152,8 @@ return(master_data)
 }
 
 #call the function here
-
+#Specify csv file.name
+#file.name = "myfile.csv"
 idf_data <- idf_dev(filename = file.name)
 
 
