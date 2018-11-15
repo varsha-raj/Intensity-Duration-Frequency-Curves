@@ -144,8 +144,9 @@ master_data <- rbind(master_data, temp_d2)
 
 #For graphing puposes
 master_data <- master_data %>%
+  group_by(duration_hr) %>%
   mutate(random_var = ifelse(duration_hr==1, 'hour', 'hours'),
-  duration_hr_label = paste(duration_hr, random_var, sep=" "))
+  duration_hr_label = paste(duration_hr, random_var, sep=" ")) %>% ungroup()
 
 return(master_data)
 
