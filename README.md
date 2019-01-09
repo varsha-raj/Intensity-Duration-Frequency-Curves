@@ -6,4 +6,4 @@ Also includes future PHL time series based on the 2080-2100 storm set
 
 ![Screenshot](idf_plot.PNG)
 
-![Screenshot1](IDF_plot_duration1.PNG)
+![Screenshot1](idf_plot_duration1.PNG)
