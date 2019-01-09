@@ -1,0 +1,286 @@
+---
+title: "IDF development"
+author: "Varsha Raj"
+date: "September 26, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r packages}
+
+library(dplyr)
+library(zoo)
+library(tidyr)
+library(data.table)
+library(lubridate)
+Sys.setenv(TZ='America/New_york')
+options(error=recover)
+options(warn=-1)
+options(stringsAsFactors=FALSE)
+options(scipen=999)
+```
+
+```{r file thatr 1900-2015 simulations master data file}
+
+setwd("D:/annual_maxima/Journal_changes_XXXX/1900_2015")
+
+sim_current <- read.csv('master_duration_files.csv', header= TRUE)
+
+sim_current <- sim_current %>%
+
+mutate(ave_intensity_mm_hr = ave_intensity_in_hr * 25.4,
+       type='current')
+
+```
+
+```{r file path to simulations future master data}
+
+setwd("D:/annual_maxima/Journal_changes_XXXX/2080-2100")
+
+sim_future <- read.csv('master_duration_files.csv', header= TRUE)
+
+sim_future <- sim_future %>%
+
+mutate(ave_intensity_mm_hr = ave_intensity_in_hr * 25.4,
+       type='future')
+
+```
+```{r get limit for for current and future simulated data}
+run_values_current <- c('run 1', 'run 10') ## current conditions
+run_values_future <- c('run 5', 'run 3')
+
+filtered_current <- sim_current %>%
+  
+  filter(simulation_number %in% run_values_current & duration_hr==1) 
+
+filtered_future <- sim_future %>%
+  
+  filter(simulation_number %in% run_values_future & duration_hr==1) 
+
+current_future = rbind(filtered_current, filtered_future)
+
+higher_extreme_values = c('run 1', 'run 5')
+lower_extreme_values = c('run 3', 'run 10')
+
+higher <- current_future %>%
+
+filter(simulation_number %in% higher_extreme_values)
+
+lower <- current_future %>%
+
+filter(simulation_number %in% lower_extreme_values)
+```
+
+```{r file path to actaul PHL data 1900-2015}
+
+setwd("D:/annual_maxima/Journal_changes_XXXX/1900_2015")
+
+master_data <- read.csv('master_data_1900_2015_mm.csv', header= TRUE)
+
+```
+Standard error here is function of sample size.
+
+SE = standard deviation/sample size
+
+Since in this dataset we also have to account for return periods, standard error here is function of return period (please see ref below)
+https://agupubs.onlinelibrary.wiley.com/doi/pdf/10.1002/wrcr.20116
+
+PWM method is uded here because it is the latest. I do not have any other reason as of now!
+
+Section below to get scale factor for 1 hour AMS series
+
+```{r caculate standard error for each return period and duration}
+date_min <- ymd("1899-01-01", tz = "America/New_york")
+date_max <- ymd("2016-01-01", tz = "America/New_york")
+
+setwd('D:/annual_maxima/Final_Gumbel')
+
+d <- read.csv("PHL_hourly_rain.csv", header= TRUE)
+
+## Set the datetime to required format and time zone
+
+d$DateTime <- ymd_hms(d$DateTime, tz = "America/New_york")
+
+## This allows to format and filter data user wants
+d <- d %>%
+
+  filter(GaugeNo==1 &
+           Rainfall > 0 &
+           DateTime > date_min &
+           DateTime < date_max) %>%
+
+  select(DateTime, Rainfall)
+
+## save d data into another dataset called phl_data with additional columns
+## phl_data and d are same set of data expect that phl_data has some addional columns
+
+## This is developer's preference to keep as seperate data sets or to just continue 
+##using d dataset and add the additional columns to it instead
+  phl_data <- data.frame(
+    DateTime = d$DateTime,
+    Rainfall = d$Rainfall,
+    Hour = hour(d$DateTime),
+    Month = month(d$DateTime),
+    Year = year(d$DateTime))
+
+phl_data$DateTime_round_hour <-
+
+ymd_hms(round_date(phl_data$DateTime, unit="hours"),tz='America/New_york')
+
+## create a seprate data set with continious time series
+full.series <-
+  data.frame(DateTime = seq(
+    from = min(phl_data$DateTime, na.rm = TRUE),
+    to = max(phl_data$DateTime, na.rm = TRUE),
+    by =  '1 hour'
+  ))
+
+## Create continuous time series with hourly wet and dry spells
+  full_data <-
+
+  merge(phl_data, full.series, by.x = 'DateTime_round_hour', by.y = 'DateTime', all = TRUE)
+
+
+  full_data$Rainfall[is.na(full_data$Rainfall)] <- 0
+
+  
+  final_data <- data.frame(
+    DateTime = full_data$DateTime_round_hour,
+    Rainfall = full_data$Rainfall,
+    Hour = hour(full_data$DateTime_round_hour),
+    Month = month(full_data$DateTime_round_hour),
+    Year = year(full_data$DateTime_round_hour))
+  
+temp_d1 <- final_data %>%
+
+group_by(Year) %>% ## groups by year
+
+## summation of n consecutive rows for every observation value in data set where "n"
+## is the duration hours
+mutate(n_hr_totals = rollapply(Rainfall, 1 , sum, align='left', fill=0, partial= TRUE)) %>%
+
+## get maximum duration total for each year
+summarize(largest_n_hr_totals = max(n_hr_totals)) %>% ungroup() %>%
+
+arrange(desc(largest_n_hr_totals))
+
+p_sd <- sd(temp_d1$largest_n_hr_totals)
+
+se_of_mean = p_sd/sqrt(nrow(temp_d1))
+
+alpha_square = (6*p_sd^2)/pi^2
+
+```
+```{r get duration 1 hr from master data}
+
+master_data_1hr <- master_data %>%
+  
+  filter(duration_hr == 1) %>%
+  
+  mutate(y = -log(-log(1-1/return_period)),
+  
+  se_value_var = (alpha_square/116)*(1.1128 + 0.4574 * y + 0.8046* y^2),
+  
+  se_value_sd = sqrt(se_value_var),
+  
+  upper_limit_int = ave_intensity_mm_hr + 1.96*se_value_sd,
+  
+  lower_limit_int = ave_intensity_mm_hr - 1.96*se_value_sd)
+
+ 
+```
+
+```{r plots}
+plot1 <- ggplot(master_data_1hr)
+
+
+plot2 <- plot1 + stat_smooth(data= master_data_1hr,
+
+           method='loess',se= FALSE, formula= y~log(x),
+
+         aes(x=return_period, y= upper_limit_int), color='grey70') + stat_smooth(data= master_data_1hr,
+
+           method='loess',se= FALSE, formula= y~log(x),
+
+         aes(x=return_period, y= lower_limit_int), color='grey70')
+
+gg1 <- ggplot_build(plot2)
+
+df2 <- data.frame(x = gg1$data[[1]]$x,
+                  ymin = gg1$data[[1]]$y,
+                  ymax = gg1$data[[2]]$y) 
+
+plot3 <- plot2 + geom_ribbon(data = df2, aes(x = x, ymin = ymin, ymax = ymax),
+              fill = "grey70", alpha = 0.4)
+
+plot4 <- plot3 + geom_smooth(data=current_future, method='loess', formula= y~log(x), size=0.5, se= FALSE,
+
+         aes(x=return_period, y= ave_intensity_mm_hr,
+
+           linetype= factor(type), group=factor(simulation_number)), color='black')
+
+plot5 <- plot4  + scale_linetype_manual(values= c(
+                                                 'dotted', 'dashed'),
+                  name="\nCreated using stochastically\ngenerated time series", breaks=c("current", "future"),
+
+                  labels=c("Current (1900-2015)","Future (2080-2100)"))
+
+plot6 <- plot5 + geom_smooth(data= subset(master_data, duration_hr==1),
+
+           method='loess', formula= y~log(x), size=0.5,
+
+         aes(x=return_period, y= ave_intensity_mm_hr, group= factor(duration_hr), color=''), linetype='solid') 
+  
+
+
+plot7 <- plot6 + scale_color_manual(values=c(rep('black',1)),
+
+         label="Created using PHL\ntime series (1900-2015)", name="")
+
+plot8 <- plot7 + scale_y_continuous(breaks=seq(20,70,10), minor_breaks=waiver(), limits=c(20,73), expand=c(0,0))  +
+             scale_x_continuous(breaks= seq(0,100,10),expand=c(0,0)) +
+
+             coord_cartesian(xlim=c(0, 110))
+
+plot9 <- plot8+labs(x= "\nAverage Recurrence Interval (years)", y= "Average Intensity (mm/hour)\n", caption='Note: Standard error for PHL (shaded area) defined using 95% confidence interval')
+
+          windowsFonts(F = windowsFont('Times New Roman'))
+
+ plot10 <- plot9 + theme(axis.text.x=element_text(size=10, family="F"),
+                                    axis.text.y=element_text(size=10, family="F"),
+                                    axis.title.x=element_text(size=10, family="F"),
+                                    axis.title.y=element_text(size=10, family="F"),
+                                    legend.title=element_text(size=10, family="F"),
+                                    legend.text=element_text(size=10, family="F"),
+                                    plot.title=element_text(size=10, hjust = 0.5, face='bold',family="F"),
+                                    #legend.text=element_blank(),
+                                    panel.background = element_rect(fill = "white", colour = NA),
+                                    panel.border = element_rect(fill = NA, color= 'grey20', size=0.4),
+                                    legend.key.size = unit(0, "cm"),
+                                    legend.key = element_rect(colour = NA, fill=NA),
+                                    panel.grid.major = element_line(size=0.2, colour = 'gray80'),
+                                    #panel.grid.major = element_blank(),
+                                    panel.grid.minor = element_line(size=0.05, colour = 'gray80'),
+                                    axis.ticks = element_line(size=0.2, colour='gray60'),
+                                    #panel.grid.minor = element_blank(),
+                                    legend.key.height=unit(1,"line"),
+                                    legend.key.width=unit(1,"line"),
+                                    #legend.spacing.y=unit(-0.5, 'cm'))
+                                    legend.margin = unit(0.1,'cm'),
+                                     plot.caption = element_text(hjust = -1, size=7))
+
+
+
+plot11 <- plot10 +
+
+guides(linetype=guide_legend(order=2), color= guide_legend(order=1))
+
+gt <- ggplot_gtable(ggplot_build(plot11))
+             grid.draw(gt)
+             tiff("IDF_duration1.tiff", units= 'in', width=6.5, height=4.5, res=250); plot(gt);dev.off()
+
+```
+
